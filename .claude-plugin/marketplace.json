@@ -1,0 +1,13 @@
+{
+  "name": "pixel-dash",
+  "owner": { "name": "Talap-creator", "url": "https://github.com/Talap-creator" },
+  "description": "A tiny pixel-art platformer that lives in a Claude Code side pane",
+  "plugins": [
+    {
+      "name": "pixel-dash",
+      "source": "./plugins/pixel-dash",
+      "description": "Run, jump, stomp and grab coins in a side pane while Claude works. /play",
+      "category": "fun"
+    }
+  ]
+}

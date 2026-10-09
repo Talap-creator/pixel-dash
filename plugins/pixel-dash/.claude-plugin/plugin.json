@@ -1,0 +1,19 @@
+{
+  "name": "pixel-dash",
+  "version": "0.1.0",
+  "description": "A tiny side-scrolling platformer in a sidebar pane: run, jump, stomp, grab coins, reach the flag. /play",
+  "author": {
+    "name": "Talap-creator"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "homepage": "https://github.com/Talap-creator/pixel-dash",
+  "repository": "https://github.com/Talap-creator/pixel-dash",
+  "keywords": [
+    "game",
+    "platformer",
+    "pixel-art",
+    "pane",
+    "fun"
+  ]
+}
