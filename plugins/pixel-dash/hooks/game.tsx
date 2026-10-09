@@ -9,7 +9,7 @@ import type { ClientModule, ClientSurface, JsonValue } from 'claude-code'
 const TICK_MS = 50
 const TILE = 6
 const GRAVITY = 0.11
-const JUMP = -0.98
+const JUMP = -1.05
 const STOMP_BOUNCE = -0.62
 const MAX_FALL = 0.7
 const RUN = 0.26
@@ -17,13 +17,9 @@ const RUN_TICKS = 6 // keys have no key-up: a press keeps you running this long
 const ENEMY_SPEED = 0.05
 const LIVES = 3
 const H = 10
-const W = 112
-const FLAG_X = 102
-const CHECKPOINT_X = 50
 
 // ---- palette and sprites ----
 
-const SKY = '#6b8cff'
 const PAL: Record<string, string> = {
   R: '#d82800', // cap, shirt
   r: '#a01800',
@@ -50,6 +46,11 @@ const PAL: Record<string, string> = {
   F: '#30c030', // flag
   H: '#58b830', // hills
   h: '#3c8c20',
+  U: '#5c7cd8', // cave stone and bricks
+  u: '#1c2c6c',
+  V: '#8ca8f0',
+  E: '#7c5020', // tree trunk
+  e: '#4c2c08',
 }
 
 const sprite = (...rows: string[]) => rows
@@ -102,32 +103,65 @@ const TILES: Record<string, string[]> = {
   cloudR: sprite('......', 'W.....', 'WWWW..', 'WWWWW.', 'WWWWWw', 'wwwww.'),
   hillL: sprite('......', '......', '....HH', '..HHHH', '.HHhHH', 'HHHHHH'),
   hillM: sprite('.HHHH.', 'HHHHHH', 'HHhHHH', 'HHHHHh', 'HHHHHH', 'HHHHHH'),
+  stone: sprite('UUUUUu', 'UVUUUu', 'UUUUUu', 'UUUUUu', 'uuuuuu', 'UUuUUU'),
+  blueBrick: sprite('uuuuuu', 'UUUuUU', 'UVUuUU', 'uuuuuu', 'UuUUUU', 'UuUVUU'),
+  treeL: sprite('.GGGGG', 'GLGGLG', 'GGGGGG', 'gGGGGG', '.ggggg', '......'),
+  treeM: sprite('GGGGGG', 'GLGGGL', 'GGGGGG', 'GGGGGG', 'gggggg', '......'),
+  treeR: sprite('GGGGG.', 'GLGGGG', 'GGGGGG', 'GGGGGg', 'ggggg.', '......'),
+  trunk: sprite('.EEEe.', '.EEee.', '.EEEe.', '.EeEe.', '.EEEe.', '.EEee.'),
   hillR: sprite('......', '......', 'HH....', 'HHHH..', 'HHhHH.', 'HHHHHH'),
 }
 
-// ---- level ----
+// ---- levels ----
 // tiles: # ground  = brick  ? coin block  B spent block  [ ] pipe  o coin
-// decoration: ( ) cloud   < ^ > hill   | pole   f flag   * pole top
+//        { - } treetop (solid)
+// decoration: ( ) cloud   < ^ > hill   | pole   f flag   * pole top   ! trunk
 
-const SOLID = new Set(['#', '=', '?', 'B', '[', ']'])
+const SOLID = new Set(['#', '=', '?', 'B', '[', ']', '{', '-', '}'])
 
-function buildLevel(): { tiles: string[][]; spawns: { x: number; y: number }[] } {
-  const g: string[][] = Array.from({ length: H }, () => Array.from({ length: W }, () => ' '))
+type Theme = 'overworld' | 'underground' | 'sky'
+type Level = { tiles: string[][]; spawns: { x: number; y: number }[]; flagX: number; checkpointX: number; theme: Theme; name: string }
+
+const THEMES: Record<Theme, { sky: string }> = {
+  overworld: { sky: '#6b8cff' },
+  underground: { sky: '#08081a' },
+  sky: { sky: '#9cbcfc' },
+}
+
+function grid(w: number) {
+  const g: string[][] = Array.from({ length: H }, () => Array.from({ length: w }, () => ' '))
   const put = (x: number, y: number, t: string) => {
-    if (y >= 0 && y < H && x >= 0 && x < W) g[y]![x] = t
+    if (y >= 0 && y < H && x >= 0 && x < w) g[y]![x] = t
   }
   const row = (x0: number, x1: number, y: number, t: string) => {
     for (let x = x0; x <= x1; x++) put(x, y, t)
   }
-  const gaps = [
-    [30, 32],
-    [66, 68],
-  ] as const
-  for (let x = 0; x < W; x++) {
-    if (gaps.some(([a, b]) => x >= a && x <= b)) continue
-    put(x, H - 2, '#')
-    put(x, H - 1, '#')
+  const ground = (x0: number, x1: number) => {
+    row(x0, x1, H - 2, '#')
+    row(x0, x1, H - 1, '#')
   }
+  const pipe = (x: number, h: number) => {
+    for (let y = H - 2 - h; y < H - 2; y++) {
+      put(x, y, '[')
+      put(x + 1, y, ']')
+    }
+  }
+  const flag = (x: number) => {
+    put(x, 0, '*')
+    put(x, 1, 'f')
+    for (let y = 2; y < H - 2; y++) put(x, y, '|')
+  }
+  return { g, put, row, ground, pipe, flag }
+}
+
+// Every gap is at most 3 tiles, every step up at most 3, and no ceiling hangs
+// over a gap: a jump rises about 4.5 tiles and carries about 4.5 across.
+function level1(): Level {
+  const W = 112
+  const { g, put, row, ground, pipe, flag } = grid(W)
+  ground(0, 29)
+  ground(33, 65)
+  ground(69, W - 1)
   for (const [x, y] of [[4, 1], [17, 2], [29, 1], [41, 2], [56, 1], [70, 2], [85, 1], [99, 2]] as const) {
     put(x, y, '(')
     put(x + 1, y, ')')
@@ -137,14 +171,8 @@ function buildLevel(): { tiles: string[][]; spawns: { x: number; y: number }[] }
     put(x + 1, H - 3, '^')
     put(x + 2, H - 3, '>')
   }
-  const pipe = (x: number, h: number) => {
-    for (let y = H - 2 - h; y < H - 2; y++) {
-      put(x, y, '[')
-      put(x + 1, y, ']')
-    }
-  }
   pipe(20, 2)
-  pipe(26, 3)
+  pipe(25, 3)
   pipe(47, 3)
   pipe(84, 2)
 
@@ -153,34 +181,103 @@ function buildLevel(): { tiles: string[][]; spawns: { x: number; y: number }[] }
   put(14, 4, '?')
   put(16, 4, '?')
   put(15, 0, '?')
-  row(29, 34, 4, '=')
-  row(30, 33, 3, 'o')
-  row(37, 41, 4, '=')
-  put(39, 4, '?')
-  row(42, 46, 1, '=')
-  row(42, 46, 0, 'o')
-  row(54, 58, 4, '=')
-  put(56, 4, '?')
-  row(63, 71, 4, '=')
-  row(64, 70, 3, 'o')
+  row(30, 32, 4, 'o') // an arc of coins over the first pit, nothing to bump into
+  row(36, 40, 4, '=')
+  put(38, 4, '?')
+  row(41, 44, 1, '=')
+  row(41, 44, 0, 'o')
+  row(53, 57, 4, '=')
+  put(55, 4, '?')
+  row(59, 63, 4, '=')
+  row(60, 62, 3, 'o')
+  row(66, 68, 4, 'o') // the second pit: open sky above it too
   for (let i = 0; i < 7; i++) for (let y = H - 3 - i; y < H - 2; y++) put(92 + i, y, '=')
-  put(FLAG_X, 0, '*')
-  put(FLAG_X, 1, 'f')
-  for (let y = 2; y < H - 2; y++) put(FLAG_X, y, '|')
+  flag(102)
   for (const x of [6, 7, 8]) put(x, H - 3, 'o')
-  for (const x of [23, 24, 51, 52, 53, 77, 78, 79]) put(x, H - 4, 'o')
+  for (const x of [22, 23, 51, 52, 77, 78, 79]) put(x, H - 4, 'o')
 
-  const spawns = [18, 24, 36, 50, 53, 60, 76, 80, 88].map(x => ({ x, y: H - 3 }))
-  spawns.push({ x: 40, y: 3 })
-  return { tiles: g, spawns }
+  const spawns = [18, 29, 37, 50, 53, 61, 76, 80, 88].map(x => ({ x, y: H - 3 }))
+  spawns.push({ x: 39, y: 3 })
+  return { tiles: g, spawns, flagX: 102, checkpointX: 50, theme: 'overworld', name: '1-1' }
 }
+
+function level2(): Level {
+  const W = 104
+  const { g, put, row, ground, pipe, flag } = grid(W)
+  ground(0, 33)
+  ground(36, 69)
+  ground(73, W - 1)
+  row(4, 96, 0, '=') // the cave roof
+  row(14, 20, 4, '=')
+  put(17, 4, '?')
+  row(15, 19, 3, 'o')
+  for (let y = 5; y < H - 2; y++) put(26, y, '=')
+  for (let y = 4; y < H - 2; y++) put(29, y, '=')
+  row(27, 28, 2, 'o')
+  row(34, 35, 5, 'o')
+  pipe(40, 2)
+  pipe(46, 3)
+  row(52, 60, 5, '=') // a low tunnel: walk under it or run along its top
+  row(53, 59, H - 3, 'o')
+  row(53, 59, 4, 'o')
+  put(64, 4, '?')
+  put(66, 4, '?')
+  row(70, 72, 5, 'o')
+  row(78, 82, 4, '=')
+  put(80, 4, '?')
+  for (let i = 0; i < 4; i++) for (let y = H - 3 - i; y < H - 2; y++) put(88 + i, y, '=')
+  flag(98)
+
+  const spawns = [22, 38, 44, 50, 63, 77, 84].map(x => ({ x, y: H - 3 }))
+  spawns.push({ x: 17, y: 3 })
+  return { tiles: g, spawns, flagX: 98, checkpointX: 50, theme: 'underground', name: '1-2' }
+}
+
+function level3(): Level {
+  const W = 104
+  const { g, put, row, ground, flag } = grid(W)
+  ground(0, 8)
+  ground(96, W - 1)
+  const tree = (x0: number, x1: number, y: number) => {
+    put(x0, y, '{')
+    row(x0 + 1, x1 - 1, y, '-')
+    put(x1, y, '}')
+    const mid = Math.floor((x0 + x1) / 2)
+    for (let t = y + 1; t < H; t++) put(mid, t, '!')
+  }
+  const tops: [number, number, number][] = [
+    [11, 15, 6], [18, 21, 4], [24, 29, 6], [32, 34, 3], [37, 42, 5], [45, 47, 3], [50, 56, 6],
+    [59, 61, 4], [64, 70, 5], [73, 75, 3], [78, 83, 6], [86, 89, 4], [92, 94, 6],
+  ]
+  for (const [a, b, y] of tops) {
+    tree(a, b, y)
+    row(a + 1, b - 1, y - 1, 'o')
+  }
+  for (const [x, y] of [[3, 1], [27, 1], [52, 2], [80, 1]] as const) {
+    put(x, y, '(')
+    put(x + 1, y, ')')
+  }
+  put(40, 1, '?')
+  put(67, 2, '?')
+  flag(100)
+
+  const spawns = [[26, 5], [40, 4], [53, 5], [67, 4], [81, 5]].map(([x, y]) => ({ x: x!, y: y! }))
+  return { tiles: g, spawns, flagX: 100, checkpointX: 50, theme: 'sky', name: '1-3' }
+}
+
+const LEVELS = [level1, level2, level3]
 
 // ---- state ----
 
 type Enemy = { x: number; y: number; vx: number; vy: number; isDead: boolean; squashed: number }
 
 type Game = {
+  level: number
+  theme: Theme
+  name: string
   tiles: string[][]
+  flagX: number
+  checkpointX: number
   x: number
   y: number
   vx: number
@@ -193,7 +290,7 @@ type Game = {
   coins: number
   lives: number
   checkpoint: number
-  phase: 'ready' | 'play' | 'dying' | 'won' | 'over'
+  phase: 'ready' | 'play' | 'dying' | 'clear' | 'won' | 'over'
   phaseTicks: number
   ticks: number
   bumps: { x: number; y: number; ttl: number }[]
@@ -201,10 +298,15 @@ type Game = {
   isReported?: boolean
 }
 
-function newGame(lives = LIVES, score = 0, coins = 0, checkpoint = 2): Game {
-  const { tiles, spawns } = buildLevel()
+function newGame(level = 0, lives = LIVES, score = 0, coins = 0, checkpoint = 2): Game {
+  const lv = LEVELS[level]!()
   return {
-    tiles,
+    level,
+    theme: lv.theme,
+    name: lv.name,
+    tiles: lv.tiles,
+    flagX: lv.flagX,
+    checkpointX: lv.checkpointX,
     x: checkpoint,
     y: H - 3,
     vx: 0,
@@ -212,7 +314,7 @@ function newGame(lives = LIVES, score = 0, coins = 0, checkpoint = 2): Game {
     facing: 1,
     runTicks: 0,
     isOnGround: true,
-    enemies: spawns.map(s => ({ ...s, vx: -ENEMY_SPEED, vy: 0, isDead: false, squashed: 0 })),
+    enemies: lv.spawns.map(s => ({ ...s, vx: -ENEMY_SPEED, vy: 0, isDead: false, squashed: 0 })),
     score,
     coins,
     lives,
@@ -228,11 +330,13 @@ function newGame(lives = LIVES, score = 0, coins = 0, checkpoint = 2): Game {
 
 // ---- physics ----
 
+const levelWidth = (g: Game) => g.tiles[0]?.length ?? 0
+
 const tileAt = (g: Game, x: number, y: number) => {
   const cx = Math.floor(x)
   const cy = Math.floor(y)
   if (cx < 0) return '#'
-  if (cy < 0 || cy >= H || cx >= W) return ' '
+  if (cy < 0 || cy >= H || cx >= levelWidth(g)) return ' '
   return g.tiles[cy]![cx]!
 }
 const isSolid = (g: Game, x: number, y: number) => SOLID.has(tileAt(g, x, y))
@@ -293,9 +397,13 @@ function step(g: Game) {
         g.lives = 0
         g.phase = 'over'
       } else {
-        Object.assign(g, newGame(g.lives - 1, g.score, g.coins, g.checkpoint), { phase: 'play' })
+        Object.assign(g, newGame(g.level, g.lives - 1, g.score, g.coins, g.checkpoint), { phase: 'play' })
       }
     }
+    return
+  }
+  if (g.phase === 'clear') {
+    if (--g.phaseTicks <= 0) Object.assign(g, newGame(g.level + 1, g.lives, g.score, g.coins), { phase: 'play' })
     return
   }
   if (g.phase !== 'play') return
@@ -334,11 +442,17 @@ function step(g: Game) {
     g.lives += 1
   }
 
-  if (g.x > CHECKPOINT_X && g.checkpoint < CHECKPOINT_X) g.checkpoint = CHECKPOINT_X
+  if (g.x > g.checkpointX && g.checkpoint < g.checkpointX) g.checkpoint = g.checkpointX
   if (g.y > H + 1) return die(g)
-  if (g.x + 0.6 >= FLAG_X) {
-    g.phase = 'won'
-    g.score += 1000 + g.lives * 500
+  if (g.x + 0.6 >= g.flagX) {
+    g.score += 1000
+    if (g.level + 1 < LEVELS.length) {
+      g.phase = 'clear'
+      g.phaseTicks = 40
+    } else {
+      g.phase = 'won'
+      g.score += g.lives * 500
+    }
     return
   }
 
@@ -349,7 +463,9 @@ function step(g: Game) {
     }
     if (Math.abs(en.x - g.x) > 18) continue // asleep off screen
     const r = move(g, en)
-    if (r.hitWall) en.vx = -en.vx
+    // turn at walls, and at ledges so they keep to their platform
+    const ahead = en.vx > 0 ? en.x + 1 + E : en.x - E
+    if (r.hitWall || (r.isOnGround && !isSolid(g, ahead, en.y + 1.5))) en.vx = -en.vx
     if (en.y > H + 1) en.isDead = true
 
     const dx = Math.abs(en.x - g.x)
@@ -370,6 +486,11 @@ function step(g: Game) {
 
 function onKey(g: Game, key: string) {
   const k = key.toLowerCase()
+  const isTitle = g.phase === 'ready' || g.phase === 'over' || g.phase === 'won'
+  if (isTitle && /^[1-9]$/.test(k) && Number(k) <= LEVELS.length) {
+    Object.assign(g, newGame(Number(k) - 1), { phase: 'play' })
+    return
+  }
   if (k === 'r' || ((g.phase === 'over' || g.phase === 'won') && (k === 'return' || k === ' ' || k === 'space'))) {
     Object.assign(g, newGame(), { phase: 'play' })
     return
@@ -390,14 +511,19 @@ function onKey(g: Game, key: string) {
   }
 }
 
+// for the tests: the simulation without the drawing
+export { LEVELS, newGame, onKey, step, isSolid }
+export type { Game }
+
 // ---- drawing ----
 
 function tileSprite(g: Game, t: string, x: number, y: number): string[] | null {
+  const cave = g.theme === 'underground'
   switch (t) {
     case '#':
-      return y === H - 2 ? TILES.grass! : TILES.dirt!
+      return cave ? TILES.stone! : tileAt(g, x, y - 1) === '#' ? TILES.dirt! : TILES.grass!
     case '=':
-      return TILES.brick!
+      return cave ? TILES.blueBrick! : TILES.brick!
     case '?':
       return g.ticks % 20 < 14 ? TILES.q1! : TILES.q2!
     case 'B':
@@ -424,6 +550,14 @@ function tileSprite(g: Game, t: string, x: number, y: number): string[] | null {
       return TILES.hillM!
     case '>':
       return TILES.hillR!
+    case '{':
+      return TILES.treeL!
+    case '-':
+      return TILES.treeM!
+    case '}':
+      return TILES.treeR!
+    case '!':
+      return TILES.trunk!
     default:
       return null
   }
@@ -438,6 +572,7 @@ function esc(text: string) {
 /** The frame as SVG: one rect per run of a colour in a pixel row, the HUD and banners as text. */
 function toSvg(buf: string[], pxW: number, pxH: number, g: Game, best: number): string {
   const pad = (n: number, w: number) => String(n).padStart(w, '0')
+  const sky = THEMES[g.theme].sky
   const parts: string[] = []
   for (let y = 0; y < pxH; y++) {
     let x = 0
@@ -445,7 +580,7 @@ function toSvg(buf: string[], pxW: number, pxH: number, g: Game, best: number): 
       const c = buf[y * pxW + x]!
       let end = x + 1
       while (end < pxW && buf[y * pxW + end] === c) end++
-      if (c !== SKY) parts.push(`<rect x="${x}" y="${y + HUD_PX}" width="${end - x}" height="1" fill="${c}"/>`)
+      if (c !== sky) parts.push(`<rect x="${x}" y="${y + HUD_PX}" width="${end - x}" height="1" fill="${c}"/>`)
       x = end
     }
   }
@@ -453,17 +588,20 @@ function toSvg(buf: string[], pxW: number, pxH: number, g: Game, best: number): 
     `<text x="${x}" y="${y}" fill="${fill}" font-size="${size}" font-weight="700" text-anchor="${anchor}">${esc(text)}</text>`
   const hud = [
     t(2, 6.5, `DASH ${pad(g.score, 6)}`, '#fcfcfc'),
-    t(pxW * 0.38, 6.5, `● ×${pad(g.coins, 2)}`, '#fca044'),
-    t(pxW * 0.56, 6.5, '♥'.repeat(Math.max(0, g.lives)), '#d82800'),
+    t(pxW * 0.36, 6.5, `● ×${pad(g.coins, 2)}`, '#fca044'),
+    t(pxW * 0.52, 6.5, '♥'.repeat(Math.max(0, g.lives)), '#d82800'),
+    t(pxW * 0.66, 6.5, g.name, '#fcfcfc'),
     t(pxW - 2, 6.5, `BEST ${pad(best, 6)}`, '#9a9a9a', 'end'),
   ].join('')
   const lines: [string, string][] =
     g.phase === 'ready'
-      ? [['PIXEL DASH', '#fca044'], ['click here, then press →', '#fcfcfc']]
+      ? [['PIXEL DASH', '#fca044'], [`world ${g.name} · → to start · 1 2 3 pick a world`, '#fcfcfc']]
+      : g.phase === 'clear'
+        ? [[`WORLD ${g.name} CLEAR!`, '#fca044'], [`score ${g.score}`, '#fcfcfc']]
       : g.phase === 'over'
         ? [['GAME OVER', '#d82800'], [`score ${g.score} · r to retry`, '#fcfcfc']]
         : g.phase === 'won'
-          ? [['COURSE CLEAR!', '#fca044'], [`score ${g.score} · r to play again`, '#fcfcfc']]
+          ? [['ALL WORLDS CLEAR!', '#fca044'], [`score ${g.score} · r to play again`, '#fcfcfc']]
           : []
   const banner = lines.length
     ? `<rect x="${pxW * 0.12}" y="${HUD_PX + 14}" width="${pxW * 0.76}" height="19" rx="2" fill="#101020" fill-opacity="0.88"/>` +
@@ -473,7 +611,7 @@ function toSvg(buf: string[], pxW: number, pxH: number, g: Game, best: number): 
   const h = pxH + HUD_PX
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${pxW * 8}" height="${h * 8}" viewBox="0 0 ${pxW} ${h}" shape-rendering="crispEdges" font-family="ui-monospace, Consolas, monospace">` +
-    `<rect width="${pxW}" height="${HUD_PX}" fill="#0c0c0c"/><rect y="${HUD_PX}" width="${pxW}" height="${pxH}" fill="${SKY}"/>` +
+    `<rect width="${pxW}" height="${HUD_PX}" fill="#0c0c0c"/><rect y="${HUD_PX}" width="${pxW}" height="${pxH}" fill="${sky}"/>` +
     parts.join('') +
     hud +
     banner +
@@ -511,11 +649,12 @@ const PixelDash: ClientModule<JsonValue, State> = (props, surface: ClientSurface
   const g = surface.state.game
   const pxW = isSvg ? SVG_TILES_ACROSS * TILE : Math.max(36, Math.min(surface.columns || 72, 160))
   const pxH = H * TILE
-  const levelPx = W * TILE
+  const sky = THEMES[g.theme].sky
+  const levelPx = levelWidth(g) * TILE
   const camPx = Math.max(0, Math.min(levelPx - pxW, Math.round(g.x * TILE - pxW / 3)))
 
   // the pixel buffer
-  const buf: string[] = new Array(pxW * pxH).fill(SKY)
+  const buf: string[] = new Array(pxW * pxH).fill(sky)
   const blit = (spr: string[], px: number, py: number) => {
     for (let sy = 0; sy < spr.length; sy++) {
       const line = spr[sy]!
@@ -526,7 +665,7 @@ const PixelDash: ClientModule<JsonValue, State> = (props, surface: ClientSurface
         if (c === '.') continue
         const x = px + sx
         if (x < 0 || x >= pxW) continue
-        buf[y * pxW + x] = PAL[c] ?? SKY
+        buf[y * pxW + x] = PAL[c] ?? sky
       }
     }
   }
@@ -612,12 +751,14 @@ const PixelDash: ClientModule<JsonValue, State> = (props, surface: ClientSurface
   // banners float above the picture instead of replacing its cells
   const banners: [string, string][] =
     g.phase === 'ready'
-      ? [['P I X E L   D A S H', '#fca044'], ['click here, then press →', '#fcfcfc']]
-      : g.phase === 'over'
-        ? [['G A M E   O V E R', '#d82800'], [`score ${g.score}  ·  r to retry`, '#fcfcfc']]
-        : g.phase === 'won'
-          ? [['C O U R S E   C L E A R !', '#fca044'], [`score ${g.score}  ·  r to play again`, '#fcfcfc']]
-          : []
+      ? [['P I X E L   D A S H', '#fca044'], [`world ${g.name} · → to start · 1 2 3 pick a world`, '#fcfcfc']]
+      : g.phase === 'clear'
+        ? [[`W O R L D   ${g.name}   C L E A R !`, '#fca044'], [`score ${g.score}`, '#fcfcfc']]
+        : g.phase === 'over'
+          ? [['G A M E   O V E R', '#d82800'], [`score ${g.score}  ·  r to retry`, '#fcfcfc']]
+          : g.phase === 'won'
+            ? [['A L L   W O R L D S   C L E A R !', '#fca044'], [`score ${g.score}  ·  r to play again`, '#fcfcfc']]
+            : []
   const overlay =
     banners.length > 0 ? (
       <Box key="overlay" position="absolute" top={7} left={0} width={pxW} flexDirection="column" alignItems="center" gap={1}>
@@ -644,7 +785,7 @@ const PixelDash: ClientModule<JsonValue, State> = (props, surface: ClientSurface
           {'♥'.repeat(Math.max(0, g.lives))}
         </Text>
         <Text bold color="#fcfcfc">
-          WORLD 1-1
+          WORLD {g.name}
         </Text>
         <Text dimColor>BEST {pad(shownBest, 6)}</Text>
       </Box>

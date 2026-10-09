@@ -33,16 +33,25 @@ A [Claude Code mod](https://claude.dev/blog/getting-started-with-claude-code-mod
 | `→` `←` / `D` `A` | run (hold it) |
 | `↑` / `space` / `W` | jump |
 | `R` | start over |
+| `1` `2` `3` | on the title screen: start in that world |
 | `Esc` | give the keys back to the prompt |
 
-## The course
+## The worlds
 
-One hand-built level, **World 1-1**, about 110 tiles long:
+Three hand-built worlds, played one after another — or press `1`, `2` or `3` on the title screen to start in any of them:
+
+| | | |
+|---|---|---|
+| **1-1** | overworld | pipes, `?` blocks, two pits, a staircase to the flag |
+| **1-2** | underground | blue stone, a brick roof, pillars to climb, a low tunnel full of coins |
+| **1-3** | treetops | almost no ground: hop between treetops of different heights over the void |
 
 - coins (+50, 100 of them give a life) and `?` blocks you hit from below (+200)
-- ten goombas — land on top to squash one (+100), touch one from the side and you lose a life
-- two pits, four pipes, platforms on two heights, a staircase and the flag (+1000, plus 500 per life left)
-- three lives and a checkpoint halfway; your best score is kept between sessions
+- goombas — land on top to squash one (+100), touch one from the side and you lose a life; they turn at ledges
+- each flag gives +1000; finishing 1-3 adds 500 per life left
+- three lives and a checkpoint halfway through each world; your best score is kept between sessions
+
+Every world is checked by a test bot that runs it start to flag, with and without goombas, so no gap is too wide and no wall too high.
 
 ## How it draws
 

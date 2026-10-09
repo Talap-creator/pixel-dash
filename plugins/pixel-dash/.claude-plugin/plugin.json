@@ -1,7 +1,7 @@
 {
   "name": "pixel-dash",
-  "version": "0.1.0",
-  "description": "A tiny side-scrolling platformer in a sidebar pane: run, jump, stomp, grab coins, reach the flag. /play",
+  "version": "0.2.0",
+  "description": "A tiny pixel-art platformer in a side pane: three worlds of running, jumping, stomping and coins. /play",
   "author": {
     "name": "Talap-creator"
   },
